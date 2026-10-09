@@ -9,14 +9,17 @@ class TikTokService:
     async def download_video(cls, url: str) -> Optional[Dict[str, Any]]:
         """
         Приймає посилання на TikTok, повертає словник із даними:
+        - id: унікальний ID відео
         - video_url: пряме посилання на чисте відео
         - title: опис відео
         - author: автор
         - music_url: аудіодоріжка
+        - music_title: назва музичного треку
+        - images: список зображень (якщо слайдшоу)
         """
         params = {
             "url": url,
-            "hd": 1  # Запит на максимальну якість
+            "hd": 1
         }
 
         async with aiohttp.ClientSession() as session:
@@ -27,15 +30,17 @@ class TikTokService:
                     
                     data = await resp.json()
                     
-                    # TikWM повертає код 0 у разі успіху
                     if data.get("code") == 0:
                         res = data.get("data", {})
+                        music_info = res.get("music_info", {})
                         return {
-                            "video_url": res.get("play"),      # Відео без водяного знака
+                            "id": str(res.get("id")),
+                            "video_url": res.get("play"),
                             "title": res.get("title", ""),
                             "author": res.get("author", {}).get("nickname", "Автор"),
                             "music_url": res.get("music"),
-                            "images": res.get("images")        # Якщо це фото-слайдшоу
+                            "music_title": music_info.get("title") or "Оригінальний звук",
+                            "images": res.get("images")
                         }
                     return None
             except Exception as e:
