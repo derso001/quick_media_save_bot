@@ -10,6 +10,8 @@ from aiogram.utils.chat_action import ChatActionSender
 from services.tiktok import TikTokService
 from keyboards.inline import MediaCallback, get_media_keyboard
 
+from database.db import get_or_create_user, increment_requests, get_stats
+
 router = Router()
 
 TIKTOK_REGEX = r"https?://(?:www\.|vm\.|vt\.|t\.)?tiktok\.com/[^\s]+"
@@ -23,6 +25,13 @@ AUDIO_CACHE: Dict[str, Dict[str, Any]] = {}
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
+    if message.from_user:
+        await get_or_create_user(
+            user_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+        )
+
     user_name = message.from_user.first_name if message.from_user else "друже"
     await message.answer(
         f"Привіт, {user_name}! 👋\n\n"
@@ -30,7 +39,6 @@ async def cmd_start(message: Message):
         "⚡️ Просто надішли мені посилання на пост!",
         parse_mode="HTML"
     )
-
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
@@ -133,6 +141,9 @@ async def handle_tiktok_link(message: Message):
                 return
 
             await status_msg.delete()
+            if message.from_user:
+                await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+                await increment_requests(message.from_user.id)
 
         except Exception as e:
             await status_msg.edit_text("❌ Сталася помилка при надсиланні медіа в Telegram.")
@@ -175,3 +186,14 @@ async def handle_audio_download(callback: CallbackQuery, callback_data: MediaCal
         except Exception as e:
             await callback.message.reply("❌ Не вдалося надіслати аудіо.")
             print(f"Помилка відправки аудіо: {e}")
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message):
+    stats = await get_stats()
+    text = (
+        "📊 <b>Статистика бота:</b>\n\n"
+        f"👥 Загалом користувачів: <b>{stats['total_users']}</b>\n"
+        f"📥 Завантажено медіа: <b>{stats['total_downloads']}</b>\n"
+        f"⭐ Преміум підписників: <b>{stats['premium_users']}</b>"
+    )
+    await message.answer(text, parse_mode="HTML")
