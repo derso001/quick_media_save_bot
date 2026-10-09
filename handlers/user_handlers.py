@@ -10,7 +10,8 @@ from aiogram.utils.chat_action import ChatActionSender
 from services.tiktok import TikTokService
 from keyboards.inline import MediaCallback, get_media_keyboard
 
-from database.db import get_or_create_user, increment_requests, get_stats
+from database.db import get_or_create_user, increment_requests, get_stats, check_user_limit
+from core.config import settings
 
 router = Router()
 
@@ -57,6 +58,25 @@ async def handle_tiktok_link(message: Message):
     if not match:
         return
 
+    # 1. Реєструємо/оновлюємо користувача та перевіряємо ліміти
+    if message.from_user:
+        await get_or_create_user(
+            user_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+        )
+        can_download, remaining = await check_user_limit(message.from_user.id)
+
+        if not can_download:
+            await message.reply(
+                "⛔️ <b>Ви вичерпали безкоштовний ліміт завантажень на сьогодні!</b>\n\n"
+                f"Твій ліміт: <b>{settings.daily_free_limit}</b> відео на добу.\n"
+                "Лічильник оновиться опівночі (UTC) 🕛\n\n"
+                "💎 Щоб зняти обмеження, оформи <b>Premium</b>.",
+                parse_mode="HTML"
+            )
+            return
+
     url = match.group(0)
     status_msg = await message.reply("⏳ Обробляю запит...")
 
@@ -69,6 +89,9 @@ async def handle_tiktok_link(message: Message):
 
         media_id = media_data.get("id")
         bot_user = await message.bot.get_me()
+        safe_title = html.escape(media_data.get("title", "")[:100])
+        safe_author = html.escape(media_data.get("author", "Автор"))
+
         safe_title = html.escape(media_data.get("title", "")[:100])
         safe_author = html.escape(media_data.get("author", "Автор"))
 
@@ -148,6 +171,31 @@ async def handle_tiktok_link(message: Message):
         except Exception as e:
             await status_msg.edit_text("❌ Сталася помилка при надсиланні медіа в Telegram.")
             print(f"Помилка відправки в TG: {e}")
+
+
+@router.message(Command("profile"))
+async def cmd_profile(message: Message):
+    if not message.from_user:
+        return
+
+    user = await get_or_create_user(
+        user_id=message.from_user.id,
+        username=message.from_user.username,
+        first_name=message.from_user.first_name,
+    )
+    
+    can_download, remaining = await check_user_limit(user.id)
+    status = "⭐️ Premium (Безліміт)" if user.is_premium else "🆓 Базовий"
+    remaining_text = "Необмежено" if user.is_premium else f"{remaining} з {settings.daily_free_limit}"
+
+    text = (
+        "👤 <b>Твій профіль:</b>\n\n"
+        f"🆔 ID: <code>{user.id}</code>\n"
+        f"Статус: <b>{status}</b>\n"
+        f"Залишок на сьогодні: <b>{remaining_text}</b>\n"
+        f"Усього завантажено: <b>{user.total_requests}</b>"
+    )
+    await message.answer(text, parse_mode="HTML")
 
 
 @router.callback_query(MediaCallback.filter(F.action == "audio"))
